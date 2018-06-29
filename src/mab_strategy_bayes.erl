@@ -33,7 +33,6 @@
 }).
 
 -record(state, {
-    bandits=[],
     bandit_scores :: #{mab_strategy:bandit() => #bandit_state{}}
 }).
 
@@ -46,7 +45,6 @@ init(Bandits, _Args) ->
         Bandits
     ),
     State = #state{
-        bandits=Bandits,
         bandit_scores=InitialScores
     },
     {ok, State}.
