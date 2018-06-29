@@ -87,7 +87,7 @@ pull(State=#state{bandit_scores=BScores}) ->
 
     {ok, State, BestBandit}.
 
-result(State, Bandit, Outcome, _Extras) ->
+result(State, Bandit, Success, _Extras) ->
     % Update the bandit in question, incrementing the trial count
     % and if Outcome =:= success, the success count
     BanditState = maps:update_with(
@@ -95,7 +95,7 @@ result(State, Bandit, Outcome, _Extras) ->
         fun(BS=#bandit_state{trials=T, successes=S}) ->
             BS#bandit_state{
                 trials=T+1,
-                successes=S+case Outcome of success -> 1; _ -> 0 end
+                successes=S+case Success of true -> 1; false -> 0 end
             }
         end,
         State#state.bandit_scores

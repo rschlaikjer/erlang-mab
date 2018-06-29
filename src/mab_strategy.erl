@@ -2,7 +2,7 @@
 -export_type([bandit/0, mab_result/0]).
 
 -type bandit() :: term().
--type mab_result() :: success | failure.
+-type mab_result() :: true | false.
 
 -callback init(Bandits :: list(bandit()), Args :: list()) -> {ok, State :: term()}.
 -callback pull(State :: term()) -> {ok, State1 :: term(), Bandit :: bandit()}.

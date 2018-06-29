@@ -15,8 +15,8 @@ new(Strategy, Bandits, StrategyArgs) ->
 pull(Pid) ->
     mab_proc:pull(Pid).
 
-result(Pid, Bandit, Outcome, Extras) ->
-    mab_proc:result(Pid, Bandit, Outcome, Extras).
+result(Pid, Bandit, Success, Extras) ->
+    mab_proc:result(Pid, Bandit, Success, Extras).
 
 close(Pid) ->
     mab_proc:close(Pid).
