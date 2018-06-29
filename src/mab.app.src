@@ -1,0 +1,13 @@
+{application, mab,
+ [
+  {description, "Multi-armed bandit implementations"},
+  {vsn, "1"},
+  {registered, []},
+  {applications, [
+      kernel,
+      stdlib,
+      sasl
+  ]},
+  {mod, {mab_app, []}},
+  {env, []}
+ ]}.
