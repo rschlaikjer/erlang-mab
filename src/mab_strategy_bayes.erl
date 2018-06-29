@@ -7,7 +7,13 @@
     result/4
 ]).
 
+% Delta at which to consider Lenz's algo to be complete
+-define(LENZ_STOP, 1.0e-8).
+% Lower limit on float size
+-define(LENZ_TINY, 1.0e-30).
+% Natural log of the sqrt of tau
 -define(LN_SQRT2PI, 0.9189385332046727418).
+% Constants for the Lanczos 15 lgamma calculation
 -define(LANCZOS_APPROX, [
     0.99999999999999709182,
     57.156235665862923517,
@@ -50,6 +56,8 @@ init(Bandits, _Args) ->
     {ok, State}.
 
 pull(State=#state{bandit_scores=BScores}) ->
+    % Pull the bandit success stats into a form we can use for the beta
+    % probability function - 1 + Wins and 1 + Losses as alpha and beta
     BanditStats = maps:fold(
         fun(B, #bandit_state{trials=T, successes=S}, Acc) ->
             [{B, 1 + S, 1 + T - S}|Acc]
@@ -58,11 +66,14 @@ pull(State=#state{bandit_scores=BScores}) ->
         BScores
     ),
 
+    % Generate a score for each bandit, using a random value and the win/loss
+    % info as curve parameters
     Scores = [
         {B, beta_ppf(Wins, Losses, rand:uniform())}
         || {B, Wins, Losses} <- BanditStats
     ],
 
+    % Fold over the results to pick the bandit with the highest score
     {BestBandit, _BestScore} = lists:foldl(
         fun({Bandit, BScore}, {CurBandit, CurBScore}) ->
             case BScore > CurBScore of
@@ -77,6 +88,8 @@ pull(State=#state{bandit_scores=BScores}) ->
     {ok, State, BestBandit}.
 
 result(State, Bandit, Outcome, _Extras) ->
+    % Update the bandit in question, incrementing the trial count
+    % and if Outcome =:= success, the success count
     BanditState = maps:update_with(
         Bandit,
         fun(BS=#bandit_state{trials=T, successes=S}) ->
@@ -92,12 +105,11 @@ result(State, Bandit, Outcome, _Extras) ->
     },
     {ok, State1}.
 
+% Percent point function, inverse of cdf
 beta_ppf(A, B, X) ->
-    IbetaInv =  1.0 / ibeta(A, B, X),
-    X_A_Sub_1 = math:pow(X, A-1),
-    X_Sub_1_B_Sub_1 = math:pow(1 - X, B - 1),
-    IbetaInv * X_A_Sub_1 * X_Sub_1_B_Sub_1.
+    1.0 / ibeta(A, B, X).
 
+% Incomplete Beta function, which is also the cdf
 ibeta(A, B, X) ->
     case X of
         _ when X < 0.0 -> nan;
@@ -112,9 +124,6 @@ ibeta(A, B, X) ->
                     ibeta_lenz(200, A, B, X, Front)
             end
     end.
-
--define(LENZ_STOP, 1.0e-8).
--define(LENZ_TINY, 1.0e-30).
 
 ibeta_lenz(Iterations, A, B, X, Front) ->
     ibeta_lenz(Iterations, Iterations, A, B, X, Front, 0.0, 1.0, 1.0).
