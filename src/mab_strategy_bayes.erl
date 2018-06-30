@@ -35,32 +35,65 @@
 
 -record(bandit_state, {
     trials = 0 :: non_neg_integer(),
-    successes = 0 :: non_neg_integer()
+    successes = 0 :: non_neg_integer(),
+    success_ringbuffer
 }).
 
 -record(state, {
-    bandit_scores :: #{mab_strategy:bandit() => #bandit_state{}}
+    bandit_scores :: #{mab_strategy:bandit() => #bandit_state{}},
+    lookback_window :: infinity | pos_integer()
 }).
 
-init(Bandits, _Args) ->
+init(Bandits, Args) ->
+    Lookback = get_lookback_window(Args),
     InitialScores = lists:foldl(
         fun(Bandit, Acc) ->
-            maps:put(Bandit, #bandit_state{}, Acc)
+            % Initialize the state for each bandit; if lookback is non-infinite,
+            % create a ringbuffer to use for tracking success rate.
+            maps:put(Bandit, #bandit_state{
+                success_ringbuffer=(case Lookback of
+                    N when is_integer(N) ->
+                        bit_ringbuffer:new(Lookback);
+                    _ -> undefinedend
+                end
+            )}, Acc)
         end,
         #{},
         Bandits
     ),
     State = #state{
-        bandit_scores=InitialScores
+        bandit_scores=InitialScores,
+        lookback_window=Lookback
     },
     {ok, State}.
 
-pull(State=#state{bandit_scores=BScores}) ->
+get_lookback_window(Args) ->
+    case proplists:get_value(lookback_window, Args, infinity) of
+        infinity -> infinity;
+        N when is_integer(N) andalso N >= 0 -> N
+    end.
+
+stats_for_bandit_with_lookback(Bandit, S=#bandit_state{}) ->
+    Trials = S#bandit_state.trials,
+    Buffer = S#bandit_state.success_ringbuffer,
+    Successes = bit_ringbuffer:popcnt(Buffer),
+    {Bandit, 1 + Successes, 1 + Trials - Successes}.
+
+stats_for_bandit_no_lookback(Bandit, #bandit_state{trials=T, successes=S}) ->
+    {Bandit, 1 + S, 1 + T - S}.
+
+pull(State=#state{bandit_scores=BScores, lookback_window=Lookback}) ->
     % Pull the bandit success stats into a form we can use for the beta
-    % probability function - 1 + Wins and 1 + Losses as alpha and beta
+    % probability function - 1 + Wins and 1 + Losses as alpha and beta.
+    % Need to differentiate the method based on whether there's a limited
+    % lookback, since one uses plain int, the other ringbuffer
+    StatFun = case Lookback of
+        infinity -> fun stats_for_bandit_no_lookback/2;
+        N when is_integer(N) -> fun stats_for_bandit_with_lookback/2
+    end,
     BanditStats = maps:fold(
-        fun(B, #bandit_state{trials=T, successes=S}, Acc) ->
-            [{B, 1 + S, 1 + T - S}|Acc]
+        fun(Bandit, BanditState, Acc) ->
+            [StatFun(Bandit, BanditState)|Acc]
         end,
         [],
         BScores
@@ -87,17 +120,36 @@ pull(State=#state{bandit_scores=BScores}) ->
 
     {ok, State, BestBandit}.
 
+bool_to_int(true) -> 1;
+bool_to_int(false) -> 0.
+
+update_bandit_with_lookback(Bandit=#bandit_state{}, Lookback, Success) ->
+    % Append a 1 to the ringbuffer on success, 0 on failure
+    Ringbuffer = Bandit#bandit_state.success_ringbuffer,
+    bit_ringbuffer:append(Ringbuffer, bool_to_int(Success)),
+
+    % Update the trial count, capping at the buffer size
+    Trials = Bandit#bandit_state.trials,
+    Bandit#bandit_state{trials=min(Lookback, Trials + 1)}.
+
+update_bandit_no_lookback(Bandit=#bandit_state{}, Success) ->
+    Bandit#bandit_state{
+        trials=Bandit#bandit_state.trials + 1,
+        successes=Bandit#bandit_state.successes + bool_to_int(Success)
+    }.
+
 result(State, Bandit, Success, _Extras) ->
     % Update the bandit in question, incrementing the trial count
     % and if Outcome =:= success, the success count
+    UpdateFun = case State#state.lookback_window of
+        infinity ->
+            fun(BanditState) -> update_bandit_no_lookback(BanditState, Success) end;
+        N when is_integer(N) ->
+            fun(BanditState) -> update_bandit_with_lookback(BanditState, N, Success) end
+    end,
     BanditState = maps:update_with(
         Bandit,
-        fun(BS=#bandit_state{trials=T, successes=S}) ->
-            BS#bandit_state{
-                trials=T+1,
-                successes=S+case Success of true -> 1; false -> 0 end
-            }
-        end,
+        UpdateFun,
         State#state.bandit_scores
     ),
     State1 = State#state{
@@ -107,7 +159,9 @@ result(State, Bandit, Success, _Extras) ->
 
 % Percent point function, inverse of cdf
 beta_ppf(A, B, X) ->
-    1.0 / ibeta(A, B, X).
+    try 1.0 / ibeta(A, B, X) of V -> V
+    catch error:badarith -> nan
+    end.
 
 % Incomplete Beta function, which is also the cdf
 ibeta(A, B, X) ->
