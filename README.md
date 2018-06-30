@@ -12,6 +12,14 @@ Currently, there is only one strategy implemented:
 - `mab_strategy_bayes`: Uses a beta distribution `B(successes, failures)` to
     determine which bandit is optimal.
 
+    Options:
+    - `{lookback_window, infinity | pos_integer()}`: Default: `infinity`.
+        If set to a number other than `infinity`, only the most recent `N`
+        events will be used to inform the MAB's choices. Having a non-infinite
+        memory allows the MAB to react more quickly to changes in reliability.
+        Past events are stored as a [bit ringbuffer](https://github.com/rschlaikjer/erlang-bitvector)
+        to conserve space.
+
 There is a defined behaviour, `mab_strategy`, that can be used for implementing
 custom strategies that fit in to this framework. The callback interface is
 relatively small:
@@ -40,7 +48,8 @@ To include a MAB in your application logic, you only need the three methods
 % Create a new MAB
 {ok, Mab} = mab:new(
     mab_strategy_bayes,
-    [VendorA, VendorB, VendorC]
+    [VendorA, VendorB, VendorC],
+    [{lookback_window, 1000}]
 ).
 
 %% Generic function using MAB input
