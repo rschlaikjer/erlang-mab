@@ -7,6 +7,10 @@
     result/4
 ]).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 % Delta at which to consider Lenz's algo to be complete
 -define(LENZ_STOP, 1.0e-8).
 % Lower limit on float size
@@ -36,7 +40,7 @@
 -record(bandit_state, {
     trials = 0 :: non_neg_integer(),
     successes = 0 :: non_neg_integer(),
-    success_ringbuffer
+    success_ringbuffer :: undefined | bit_ringbuffer:bit_ringbuffer()
 }).
 
 -record(state, {
@@ -53,7 +57,8 @@ init(Bandits, Args) ->
             maps:put(Bandit, #bandit_state{
                 success_ringbuffer=(case Lookback of
                     N when is_integer(N) ->
-                        bit_ringbuffer:new(Lookback);
+                        {ok, Ringbuffer} = bit_ringbuffer:new(Lookback),
+                        Ringbuffer;
                     _ -> undefinedend
                 end
             )}, Acc)
@@ -76,7 +81,7 @@ get_lookback_window(Args) ->
 stats_for_bandit_with_lookback(Bandit, S=#bandit_state{}) ->
     Trials = S#bandit_state.trials,
     Buffer = S#bandit_state.success_ringbuffer,
-    Successes = bit_ringbuffer:popcnt(Buffer),
+    {ok, Successes} = bit_ringbuffer:popcnt(Buffer),
     {Bandit, 1 + Successes, 1 + Trials - Successes}.
 
 stats_for_bandit_no_lookback(Bandit, #bandit_state{trials=T, successes=S}) ->
@@ -219,9 +224,7 @@ ibeta_lenz(Iterations, MaxIterations, A, B, X, Front, D, C, F) ->
 
 
 fabs(N) when is_float(N) andalso N >= 0 -> N;
-fabs(N) when is_integer(N) andalso N >= 0 -> N;
-fabs(N) when is_float(N) -> -N;
-fabs(N) when is_integer(N) -> -N.
+fabs(N) when is_float(N) -> -N.
 
 lgamma(X) ->
     case X of
@@ -237,3 +240,25 @@ lgamma(X) ->
             Tmp = X + (607 / 128.0 + 0.5),
             (?LN_SQRT2PI + math:log(Acc)) + (X + 0.5) * math:log(Tmp) - Tmp
     end.
+
+-ifdef(TEST).
+
+mab_no_lookback_test() ->
+    application:ensure_all_started(mab),
+    Bandits = [a, b, c],
+    {ok, Mab} = mab:new(?MODULE, Bandits),
+    {ok, V} = mab:pull(Mab),
+    true = lists:member(V, Bandits),
+    ok = mab:result(Mab, V, true),
+    ok = mab:close(Mab).
+
+mab_lookback_test() ->
+    application:ensure_all_started(mab),
+    Bandits = [a, b, c],
+    {ok, Mab} = mab:new(?MODULE, Bandits, [{lookback_window, 10}]),
+    {ok, V} = mab:pull(Mab),
+    true = lists:member(V, Bandits),
+    ok = mab:result(Mab, V, true),
+    ok = mab:close(Mab).
+
+-endif.
